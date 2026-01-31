@@ -1,4 +1,3 @@
-# apps/cms/Dockerfile
 FROM node:20-bookworm-slim AS deps
 
 RUN apt-get update && apt-get install -y \
@@ -8,20 +7,23 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /srv/app
 
-# instala deps primeiro (melhor cache)
-COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
+COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
 
-# escolha 1 (npm)
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+RUN if [ -f yarn.lock ]; then \
+      corepack enable && yarn install --frozen-lockfile; \
+    elif [ -f pnpm-lock.yaml ]; then \
+      corepack enable && pnpm install --frozen-lockfile; \
+    elif [ -f package-lock.json ]; then \
+      npm ci; \
+    else \
+      npm install; \
+    fi
 
-# copia o resto
 COPY . .
 
-# build do admin
 ENV NODE_ENV=production
-RUN npm run build
+RUN if [ -f yarn.lock ]; then yarn build; else npm run build; fi
 
-# --- runtime ---
 FROM node:20-bookworm-slim AS runner
 
 RUN apt-get update && apt-get install -y \
@@ -31,8 +33,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /srv/app
 ENV NODE_ENV=production
 
-# copia app pronta
 COPY --from=deps /srv/app /srv/app
 
 EXPOSE 1337
-CMD ["npm", "run", "start"]
+CMD ["sh", "-lc", "if [ -f yarn.lock ]; then yarn start; else npm run start; fi"]
