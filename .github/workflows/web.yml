@@ -1,4 +1,4 @@
-name: build-and-push-web
+name: build-and-deploy-web
 
 on:
     push:
@@ -7,34 +7,41 @@ on:
             - "apps/web/**"
             - ".github/workflows/web.yml"
 
-permissions:
-    contents: read
-    packages: write
-
 jobs:
-    build:
+    deploy:
         runs-on: ubuntu-latest
+
         steps:
-            - uses: actions/checkout@v4
+            - name: Checkout
+              uses: actions/checkout@v4
 
-            - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
-
-            - name: Login to GHCR
-              uses: docker/login-action@v3
+            - name: Setup Node
+              uses: actions/setup-node@v4
               with:
-                  registry: ghcr.io
-                  username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
+                  node-version: 20
+                  cache: yarn
+                  cache-dependency-path: apps/web/yarn.lock
 
-            - name: Build and push (web)
-              uses: docker/build-push-action@v6
+            - name: Install dependencies
+              working-directory: apps/web
+              run: yarn install --frozen-lockfile
+
+            - name: Build Astro
+              working-directory: apps/web
+              run: yarn build
+              # gera apps/web/dist
+
+            - name: Configure AWS (Magalu Object Storage)
+              uses: aws-actions/configure-aws-credentials@v4
               with:
-                  context: apps/web
-                  file: apps/web/Dockerfile
-                  push: true
-                  tags: |
-                      ghcr.io/${{ github.repository }}/web:latest
-                      ghcr.io/${{ github.repository }}/web:${{ github.sha }}
-                  cache-from: type=gha
-                  cache-to: type=gha,mode=max
+                  aws-access-key-id: ${{ secrets.MAGALU_ACCESS_KEY_ID }}
+                  aws-secret-access-key: ${{ secrets.MAGALU_SECRET_ACCESS_KEY }}
+                  aws-region: us-east-1 # não é usado, mas o action exige
+
+            - name: Deploy to Magalu Object Storage
+              working-directory: apps/web
+              run: |
+                  aws \
+                    --endpoint-url https://br-se1.magaluobjects.com \
+                    s3 sync dist/ s3://astro-web-prod/ \
+                    --delete
